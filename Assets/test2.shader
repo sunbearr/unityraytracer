@@ -37,9 +37,14 @@ Shader "Custom/RayTracing"
             uniform float3 ViewParams;
             uniform float4x4 CamLocalToWorldMatrix;
 
+            // shader structs
             struct Ray {
                 float3 origin;
                 float3 dir;
+            };
+
+            struct objMaterial {
+                float4 colour;
             };
 
             struct HitInfo {
@@ -47,7 +52,19 @@ Shader "Custom/RayTracing"
                 float distance;
                 float3 hitPoint;
                 float3 hitNormal;
+                objMaterial material;
             };
+
+
+            struct Sphere {
+                float3 position;
+                float radius;
+                objMaterial material;
+            };
+
+            // buffers
+            StructuredBuffer<Sphere> Spheres;
+            int NumSpheres;
 
             HitInfo hitSphere(Ray ray, float3 sphereCentre, float sphereRadius)
             {
@@ -59,8 +76,8 @@ Shader "Custom/RayTracing"
 
                 // calculate sphere intersection quadratic values
                 float a = dot(ray.dir, ray.dir);
-                float b = 2.0 * dot(ray.dir, ray.origin);
-                float c = dot(ray.origin, ray.origin) - sphereRadius * sphereRadius;
+                float b = 2.0 * dot(ray.dir, offsetCentre);
+                float c = dot(offsetCentre , offsetCentre ) - sphereRadius * sphereRadius;
                 float discriminant = b * b - 4 * a * c;
 
                 // if discriminant < 0 then the ray missed, hitInfo stays empty.
@@ -74,7 +91,7 @@ Shader "Custom/RayTracing"
                         hitInfo.didHit = true;
                         hitInfo.distance = distance;
                         hitInfo.hitPoint = ray.origin + ray.dir * distance;
-                        hitInfo.hitNormal = normalize(hitInfo.hitPoint - sphereCentre);
+                        hitInfo.hitNormal = -normalize(hitInfo.hitPoint - sphereCentre);
                     }
                     
 
@@ -82,6 +99,44 @@ Shader "Custom/RayTracing"
 
                 return hitInfo;
 
+            }
+
+
+
+            HitInfo hitGround(Ray ray) {
+
+                HitInfo hitInfo = (HitInfo)0;
+
+                // Calculate ray distance to infinite ground at y=0
+                float distance = -ray.origin.y / ray.dir.y;
+                if (distance > 0 && distance < 1.#INF) {
+                    hitInfo.didHit = true;
+                    hitInfo.distance = distance;
+                    hitInfo.hitPoint = ray.origin + distance * ray.dir;
+                    hitInfo.hitNormal = float3(0,1,0); // Pointing up in the y axis.
+                }
+
+                return hitInfo;
+            }
+
+            HitInfo CalculateRayCollisions(Ray ray)
+            {
+                HitInfo closestHit = (HitInfo)0;
+                // assume closesthit is a miss (infinitely far)
+                closestHit.distance = 1.#INF;
+
+                for (int i = 0; i < NumSpheres; i++) {
+                    Sphere sphere = Spheres[i];
+
+                    HitInfo hitInfo = hitSphere(ray, sphere.position, sphere.radius);
+
+                    if (hitInfo.didHit && hitInfo.distance < closestHit.distance) {
+                        closestHit =  hitInfo;
+                        closestHit.material = sphere.material;
+                    }
+                }
+
+                return closestHit;
             }
 
             fixed4 frag (v2f i) : SV_Target
@@ -92,7 +147,7 @@ Shader "Custom/RayTracing"
                 Ray ray;
                 ray.origin = _WorldSpaceCameraPos;
                 ray.dir = normalize(viewPoint - ray.origin);
-                return float4(hitSphere(ray, float3(2,1,0.5), 0.5).didHit,0,0,0);
+                return CalculateRayCollisions(ray).material.colour;
 
             }
             ENDCG
