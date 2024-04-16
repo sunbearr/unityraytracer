@@ -6,8 +6,11 @@ public class RayTracingMaster : MonoBehaviour
 
     private RenderTexture _target;
 
+    private Camera _camera;
+
     private void OnRenderImage(RenderTexture source, RenderTexture destination)
     {
+        SetShaderParameters();
         Render(destination);
     }
 
@@ -41,5 +44,16 @@ public class RayTracingMaster : MonoBehaviour
             _target.enableRandomWrite = true;
             _target.Create();
         }
+    }
+
+    private void Awake()
+    {
+        _camera = GetComponent<Camera>();
+    }
+
+    private void SetShaderParameters()
+    {
+        RayTracingShader.SetMatrix("_CameraToWorld", _camera.cameraToWorldMatrix);
+        RayTracingShader.SetMatrix("_CameraInverseProjection", _camera.projectionMatrix.inverse);
     }
 }
