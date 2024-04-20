@@ -15,10 +15,13 @@ float Resolution;
 
 float2 _PixelOffset;
 
+int MaxBounces;
+
 struct Ray
 {
     float3 origin;
     float3 direction;
+    float3 energy; // energy is a vector since we store the energy of each rgb colour
 };
 
 // contains information on ray collisions
@@ -44,6 +47,7 @@ Ray CreateRay(float3 origin, float3 direction)
     Ray ray;
     ray.origin = origin;
     ray.direction = direction;
+    ray.energy = float3(1.0f, 1.0f, 1.0f);
     return ray;
 }
 
@@ -104,7 +108,15 @@ RayHit Trace(Ray ray)
 {
     RayHit bestHit = CreateRayHit();
     IntersectGroundPlane(ray, bestHit);
-    IntersectSphere(ray, bestHit, float4(0, 3.0f, 0, 1.0f));
+    for (int i = 0; i < 2; i++) {
+        for (int j = 0; j < 2; j++) {
+            for (int k = 0; k < 2; k++) {
+                IntersectSphere(ray, bestHit, float4(3.0f * j, 3.0f * k, 3.0f * i, 1.0f));
+            }
+        }
+    }
+    
+    
     return bestHit;
 }
 
@@ -113,11 +125,21 @@ float3 Shade(inout Ray ray, RayHit hit)
 {
     // this just checks that we actually hit something
     if (hit.distance < 1.#INF) {
-        // return light purple ground plane
-        return hit.normal * 0.5f + float3(0.4f, -0.1f, 0.7f);
+
+        float3 specular = float3(0.6f, 0.6f, 0.6f);
+        // Reflect the ray and multiply energy with specular reflection
+        ray.origin = hit.position + hit.normal * 0.001f;
+        ray.direction = reflect(ray.direction, hit.normal);
+        ray.energy *= specular;
+        // Return nothing
+        return float3(0.0f, 0.0f, 0.0f);
     }
     // condition for missing
     else {
+
+        // Erase the ray's energy - the sky doesn't reflect anything
+        ray.energy = 0.0f;
+
         float theta = acos(ray.direction.y) / -PI;
         float phi = atan2(ray.direction.x, -ray.direction.z) / -PI * 0.5f;
         float4 skyColour = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, float2(phi, theta), 0);
@@ -139,8 +161,16 @@ void CSMain (uint3 id : SV_DispatchThreadID)
    Ray ray = CreateCameraRay(uv);
 
    // write pixel data to shader
-   RayHit hit = Trace(ray);
-   float3 result = Shade(ray, hit);
+   float3 result = float3(0,0,0);
+   for (int i = 0; i < MaxBounces; i++)
+   {
+        RayHit hit = Trace(ray);
+        result += ray.energy * Shade(ray, hit);
+
+        if (!any(ray.energy)) {
+            break;
+        }
+   }
    Result[id.xy] = float4(result, 1);
 
 }

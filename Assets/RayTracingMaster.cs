@@ -8,6 +8,7 @@ public class RayTracingMaster : MonoBehaviour
 
     public Texture SkyboxTexture;
     
+    public int MaxBounces = 8;
 
     private Camera _camera;
 
@@ -74,6 +75,7 @@ public class RayTracingMaster : MonoBehaviour
         RayTracingShader.SetMatrix("_CameraInverseProjection", _camera.projectionMatrix.inverse);
         RayTracingShader.SetTexture(0, "_SkyboxTexture", SkyboxTexture);
         RayTracingShader.SetVector("_PixelOffset", new Vector2(Random.value, Random.value));
+        RayTracingShader.SetInt("MaxBounces", MaxBounces);
     }
     
     // control camera
