@@ -45,6 +45,8 @@ Shader "Custom/RayTracing"
 
             struct objMaterial {
                 float4 colour;
+                float4 emissionColour;
+                float emissionStrength;
             };
 
             struct HitInfo {
@@ -127,7 +129,7 @@ Shader "Custom/RayTracing"
 
                 for (int i = 0; i < NumSpheres; i++) {
                     Sphere sphere = Spheres[i];
-
+//🤷‍♂️
                     HitInfo hitInfo = hitSphere(ray, sphere.position, sphere.radius);
 
                     if (hitInfo.didHit && hitInfo.distance < closestHit.distance) {
@@ -139,15 +141,91 @@ Shader "Custom/RayTracing"
                 return closestHit;
             }
 
+            // handle random ray bounces for diffuse reflection
+
+            float RandomValue(inout uint state)
+            {
+                state = state * 747796405 + 2891336453;
+                uint result = ((state >> ((state >> 28) + 4)) ^ state) * 277803737;
+                result = (result >> 22) ^ result;
+                return result / 4294967295;
+            }
+
+            float RandomValueNormalDistribution(inout uint state)
+            {
+                float theta = 2 * 3.1415926 * RandomValue(state);
+                float rho = sqrt(-2 * log(RandomValue(state)));
+                return rho * cos(theta);
+            }
+
+            // randomise direction via spherically symetric normal distribution
+            float3 RandomDirection(inout uint state)
+            {
+                float x = RandomValueNormalDistribution(state);
+                float y = RandomValueNormalDistribution(state);
+                float z = RandomValueNormalDistribution(state);
+                return normalize(float3(x,y,z));
+
+            }
+
+            // ensure random directions are exiting sphere not entering
+            float3 RandomHemisphereDirection(float3 normal, inout uint rngState)
+            {
+                float3 dir = RandomDirection(rngState);
+                return dir * sign(dot(normal, dir));
+            }
+
+            float3 Trace(Ray ray, inout uint rngState)
+            {
+
+                float3 incomingLight = 0;
+                // light is initially white
+                float3 rayColour = 1;
+
+                float MaxBounceCount = 1;
+
+                // trace rays as they reflect around the scene.
+                for (int i = 0; i <= MaxBounceCount; i++) {
+                    HitInfo hitInfo = CalculateRayCollisions(ray);
+                    if (hitInfo.didHit) {
+
+                        ray.origin = hitInfo.hitPoint;
+                        ray.dir = RandomHemisphereDirection(hitInfo.hitNormal, rngState);
+
+                        objMaterial material = hitInfo.material;
+                        // for calculate colour of emmitted light
+                        float3 emittedLight = material.emissionColour * material.emissionStrength;
+                        incomingLight += emittedLight * rayColour;
+                        rayColour *= material.colour;
+                    }
+                    else {
+                        break;
+                    }
+                }
+                return incomingLight;
+            }
+
             fixed4 frag (v2f i) : SV_Target
             {
+                // initialize camera perspective in scene
                 float3 viewPointLocal = float3(i.uv - 0.5, 1) * ViewParams;
                 float3 viewPoint = mul(CamLocalToWorldMatrix, float4(viewPointLocal, 1));
 
+                // initalize ray and ray properties for each pixel
                 Ray ray;
                 ray.origin = _WorldSpaceCameraPos;
                 ray.dir = normalize(viewPoint - ray.origin);
-                return CalculateRayCollisions(ray).material.colour;
+
+                // calculate random diffuse reflection seed
+                uint2 numPixels = _ScreenParams.xy;
+                uint2 pixelCoord = i.uv * numPixels;
+                uint pixelIndex = pixelCoord.y * numPixels.x + pixelCoord.x;
+                uint rngState = pixelIndex;
+
+
+                // initial tracing output
+                float3 pixelColour = Trace(ray, rngState);
+                return float4(pixelColour, 1);
 
             }
             ENDCG

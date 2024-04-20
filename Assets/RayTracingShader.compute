@@ -7,13 +7,37 @@ RWTexture2D<float4> Result;
 float4x4 _CameraToWorld;
 float4x4 _CameraInverseProjection;
 
+Texture2D<float4> _SkyboxTexture;
+SamplerState sampler_SkyboxTexture;
+static const float PI = 3.14159265f;
+
 float Resolution;
+
+float2 _PixelOffset;
 
 struct Ray
 {
     float3 origin;
     float3 direction;
 };
+
+// contains information on ray collisions
+struct RayHit
+{
+    float3 position;
+    float distance;
+    float3 normal;
+};
+
+RayHit CreateRayHit()
+{
+    RayHit hit;
+    hit.position = float3(0.0f, 0.0f, 0.0f);
+    // hit distance is initalized as infinitely far (i.e. a miss)
+    hit.distance = 1.#INF;
+    hit.normal = float3(0.0f, 0.0f, 0.0f);
+    return hit;
+}
 
 Ray CreateRay(float3 origin, float3 direction)
 {
@@ -22,6 +46,8 @@ Ray CreateRay(float3 origin, float3 direction)
     ray.direction = direction;
     return ray;
 }
+
+
 
 Ray CreateCameraRay(float2 uv)
 {
@@ -37,6 +63,68 @@ Ray CreateCameraRay(float2 uv)
     return CreateRay(origin, direction);
 }
 
+// start basic tracing
+
+void IntersectGroundPlane(Ray ray, inout RayHit bestHit)
+{
+    // calculate ray distance to hitting the ground
+    float distance = -ray.origin.y / ray.direction.y;
+    if (distance > 0 && distance < bestHit.distance) {
+        bestHit.distance = distance;
+        bestHit.position = ray.origin + distance * ray.direction;
+        // ray bounces off ground plane at y = 0.
+        bestHit.normal = float3(0.0f, 1.0f, 0.0f);
+    }
+}
+
+void IntersectSphere(Ray ray, inout RayHit bestHit, float4 sphere)
+{
+    // calculate ray distance to sphere intersection
+    float3 d = ray.origin - sphere.xyz;
+    float p1 = -dot(ray.direction, d);
+    float p2sqr = p1 * p1 - dot(d,d) + sphere.w * sphere.w;
+
+    if (p2sqr < 0) {
+        return;
+    }
+
+    float p2 = sqrt(p2sqr);
+    float t = p1 - p2 > 0 ? p1 - p2 : p1 + p2;
+    if (t > 0 && t < bestHit.distance) {
+        bestHit.distance = t;
+        bestHit.position = ray.origin + t * ray.direction;
+        // ray bounces off ground plane at y = 0.
+        bestHit.normal = normalize(bestHit.position - sphere.xyz);
+    }
+
+}
+
+// response for tracing cast rays
+RayHit Trace(Ray ray)
+{
+    RayHit bestHit = CreateRayHit();
+    IntersectGroundPlane(ray, bestHit);
+    IntersectSphere(ray, bestHit, float4(0, 3.0f, 0, 1.0f));
+    return bestHit;
+}
+
+// shades pixel colour we calculate from tracing
+float3 Shade(inout Ray ray, RayHit hit)
+{
+    // this just checks that we actually hit something
+    if (hit.distance < 1.#INF) {
+        // return light purple ground plane
+        return hit.normal * 0.5f + float3(0.4f, -0.1f, 0.7f);
+    }
+    // condition for missing
+    else {
+        float theta = acos(ray.direction.y) / -PI;
+        float phi = atan2(ray.direction.x, -ray.direction.z) / -PI * 0.5f;
+        float4 skyColour = _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, float2(phi, theta), 0);
+        return skyColour.rgb;
+    }
+}
+
 [numthreads(8,8,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
@@ -45,11 +133,14 @@ void CSMain (uint3 id : SV_DispatchThreadID)
    Result.GetDimensions(width, height);
 
    // Transform pixel to [-1,1] range
-   float2 uv = float2((id.xy + float2(0.5f, 0.5f)) / float2(width, height) * 2.0f - 1.0f);
+   float2 uv = float2((id.xy + _PixelOffset) / float2(width, height) * 2.0f - 1.0f);
 
    // Get a ray for the UVs
    Ray ray = CreateCameraRay(uv);
 
-   // Write some colors
-   Result[id.xy] = float4(ray.direction * 0.5f + 0.5f, 1.0f);
+   // write pixel data to shader
+   RayHit hit = Trace(ray);
+   float3 result = Shade(ray, hit);
+   Result[id.xy] = float4(result, 1);
+
 }

@@ -11,10 +11,13 @@ public struct RayTracingMaterial
 	}
 
 	public Color colour;
+	public Color emissionColour;
 
-
+	public float emissionStrength;
 	public void SetDefaultValues()
 	{
 		colour = Color.white;
+		emissionColour = Color.white;
+		emissionStrength = 0;
     }
 }
